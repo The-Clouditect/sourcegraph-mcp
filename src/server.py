@@ -9,9 +9,9 @@ import requests
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
-from src.backends import SourcegraphClient, SourcegraphContentFetcher
-from src.backends.models import FormattedResult
-from src.core import PromptManager
+from backends import SourcegraphClient, SourcegraphContentFetcher
+from backends.models import FormattedResult
+from core import PromptManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -50,7 +50,7 @@ This MCP server integrates with Sourcegraph, a universal code search platform th
 uv sync
 
 # Run the server
-uv run sourcegraph-mcp
+uv run python -m src.main
 ```
 
 ### Using pip

@@ -33,14 +33,15 @@ dev = [
 ]
 
 [project.scripts]
-sourcegraph-mcp = "src.main:main"
+sourcegraph-mcp = "sourcegraph_mcp.main:main"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src"]
+[tool.setuptools]
+packages = ["sourcegraph_mcp"]
+package-dir = {"sourcegraph_mcp" = "src"}
 
 [tool.ruff]
 line-length = 120

@@ -1,6 +1,6 @@
 """Sourcegraph search client implementation."""
 
-from src.backends.client import SourcegraphClient
-from src.backends.fetcher import SourcegraphContentFetcher
+from .client import SourcegraphClient
+from .fetcher import SourcegraphContentFetcher
 
 __all__ = ["SourcegraphClient", "SourcegraphContentFetcher"]
