@@ -1,47 +1,136 @@
-name: Build and Push Docker Image
+name: Sync, Clean, Build and Push Sourcegraph MCP Docker Image
+
 on:
+  schedule:
+    - cron: '0 0 * * *'  # Daily at midnight
   push:
-    branches:
-      - master
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+    branches: [ main ]  # Using main branch
+  workflow_dispatch:     # Manual trigger
+
 jobs:
-  build:
+  sync-and-build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
       id-token: write
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=sha
-            type=raw,value=latest
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+    
+    - name: Configure Git
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+    
+    - name: Fetch upstream changes
+      run: |
+        git remote add upstream https://github.com/divar-ir/sourcegraph-mcp.git
+        git fetch upstream
+    
+    - name: Compare upstream with local
+      id: check_upstream
+      run: |
+        # Store latest commit hashes
+        UPSTREAM_LATEST=$(git rev-parse upstream/master)
+        LAST_BUILD_DATE=$(git log -1 --format=%cd --date=iso)
+        
+        echo "Current branch: $(git branch --show-current)"
+        echo "Latest upstream commit: $UPSTREAM_LATEST"
+        echo "Latest local commit date: $LAST_BUILD_DATE"
+        
+        # Compare based on file content that matters for the build
+        git diff --quiet upstream/master -- . ':!.github' || CHANGES_DETECTED=$?
+        
+        if [ "${CHANGES_DETECTED:-0}" -eq "1" ]; then
+          echo "Detected changes in files that affect the build"
+          echo "SKIP_BUILD=false" >> $GITHUB_ENV
+        else
+          echo "No relevant changes detected in upstream"
+          echo "SKIP_BUILD=true" >> $GITHUB_ENV
+        fi
+    
+    - name: Process upstream changes
+      if: env.SKIP_BUILD != 'true'
+      run: |
+        echo "Processing upstream changes..."
+        # Save our workflow file
+        mkdir -p /tmp/saved
+        cp -r .github/workflows/*.yml /tmp/saved/ || true
+        
+        # Backup our Docker files
+        cp Dockerfile /tmp/saved/ || true
+        cp docker-compose.yml /tmp/saved/ || true
+        cp README.md /tmp/saved/ || true
+        
+        # Pull all upstream changes
+        git merge upstream/master --no-commit --no-ff || true
+        
+        # Remove ALL workflow files
+        git rm -rf .github/workflows/ || true
+        mkdir -p .github/workflows/
+        
+        # Restore our workflow file
+        cp /tmp/saved/*.yml .github/workflows/ || true
+        
+        # Restore our Docker files if they exist
+        cp /tmp/saved/Dockerfile . || true
+        cp /tmp/saved/docker-compose.yml . || true
+        cp /tmp/saved/README.md . || true
+        
+        # Commit and push changes
+        git add .
+        git commit -m "Merge upstream changes with workflow sanitization"
+        git push origin main
+    
+    - name: Set up QEMU
+      if: env.SKIP_BUILD != 'true'
+      uses: docker/setup-qemu-action@v3
+    
+    - name: Set up Docker Buildx
+      if: env.SKIP_BUILD != 'true'
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Login to GitHub Container Registry
+      if: env.SKIP_BUILD != 'true'
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.repository_owner }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Login to Docker Hub
+      if: env.SKIP_BUILD != 'true'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    
+    - name: Extract metadata for Docker
+      if: env.SKIP_BUILD != 'true'
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ghcr.io/${{ github.repository_owner }}/sourcegraph-mcp
+          ${{ secrets.DOCKERHUB_USERNAME }}/sourcegraph-mcp
+        tags: |
+          type=raw,value=latest
+          type=raw,value={{date 'YYYYMMDD'}}
+          type=ref,event=branch
+          type=sha
+    
+    - name: Build and push
+      if: env.SKIP_BUILD != 'true'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
